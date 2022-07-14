@@ -204,16 +204,25 @@ class FirstPastThePost(EvaluationProcedure):
         else:
             return society_ranking
 
-def fptp(rankings, list_of_alternatives):
-    list_of_alternatives = np.array(list_of_alternatives)
-    vote_totals = np.zeros((len(list_of_alternatives)))
-    for ranking in rankings:
-        if len(ranking) > 0:
-            vote_totals[np.where(list_of_alternatives == ranking[0])] += 1
-    society_ranking = list_of_alternatives[np.flip(np.argsort(vote_totals))]
-    # winners = np.where(vote_totals == np.max(vote_totals))
-    # winner = winners[0][0]
-    return society_ranking
+
+class InstantRunoff(EvaluationProcedure):
+    def __init__(self, first_place_only: bool = False):
+        super().__init__(first_place_only)
+
+    def evaluate(self, rankings: list[list], list_of_alternatives: list):
+        if len(list_of_alternatives) == 1:
+            return [list_of_alternatives[0]]
+        first_place_votes = {ii: 0 for ii in list_of_alternatives}
+        for ranking in rankings:
+            if len(ranking) > 0:
+                first_place_votes[ranking[0]] += 1
+        if len(list_of_alternatives) == 2:
+            return [max(first_place_votes, key=first_place_votes.get)]
+        else:
+            min_alternative = min(first_place_votes, key=first_place_votes.get)
+            list_of_alternatives.remove(min_alternative)
+            rankings = simplify(rankings, list_of_alternatives)
+            return self.evaluate(rankings, list_of_alternatives)
 
 
 class Axiom:
@@ -242,23 +251,9 @@ class IndependenceOfIrrelevantAlternatives(Axiom):
             new_society_ranking = evaluation_procedure.evaluate(
                 simplify(election.rankings, sub_list), list(sub_list))
             if not check_maintains_order(new_society_ranking, society_ranking, self.first_place_only):
-                print(f'IIA Failed: Ranking with all was {society_ranking}, but the ranking with only the alternatives {sub_list} is {new_society_ranking}')
+                print(f'{evaluation_procedure.__class__.__name__} Failed IIA: Ranking with all was {society_ranking}, but the ranking with only the alternatives {sub_list} is {new_society_ranking}')
                 return False
         return True
-
-def check_iia(voting_system, election, check_all=True):
-    number_of_alternatives = election.number_of_alternatives
-    sub_lists = election.sub_lists
-    society_ranking = voting_system(election.rankings, list(range(number_of_alternatives)))
-    for sub_list in sub_lists:
-        if not check_all and society_ranking[0] not in sub_list:
-            continue
-        new_society_ranking = voting_system(simplify(election.rankings, sub_list), list(sub_list))
-        if not check_maintains_order(new_society_ranking, society_ranking):
-            print(f'IIA Failed: Ranking with all was {society_ranking}, but the ranking with only the alternatives {sub_list} is {new_society_ranking}')
-            return False
-    # print('IIA Satisfied')
-    return True
 
 
 def check_maintains_order(small_list, large_list, first_place_only):
@@ -318,17 +313,23 @@ def check_unanimity(voting_system, election):
     return True
 
 now = time.time()
-N = 100
-results = np.full(N, False)
-number_candidates = 3
+N = 1000
+fptp_results = np.full(N, False)
+ir_results = np.full(N, False)
+number_candidates = 4
 randomizer = Randomizer(number_candidates, 'uniform')
 fptp = FirstPastThePost()
+ir = InstantRunoff()
 iia = IndependenceOfIrrelevantAlternatives()
 for ii in range(N):
     election = Election_Profile(1000, randomizer)
-    results[ii] = iia.check_axiom(election, fptp)
+    fptp_result = fptp.evaluate(election.rankings, list(range(number_candidates)))
+    ir_result = ir.evaluate(election.rankings, list(range(number_candidates)))
+    fptp_results[ii] = iia.check_axiom(election, fptp)
+    ir_results[ii] = iia.check_axiom(election, ir)
     # print(election)
     # results[ii] = check_iia(fptp, election)
     # check_unanimity(fptp, election)
-print(f'FPTP satisfies IIA {100 * sum(results)/N}% of the time')
+print(f'FPTP satisfies IIA {100 * sum(fptp_results)/N}% of the time')
+print(f'IR satisfies IIA {100 * sum(ir_results)/N}% of the time')
 print(time.time() - now)
