@@ -12,13 +12,96 @@ from typing import Union, Callable
 #  class for results evaluation, subclasses for different ways (fptp, bordas, instant runoffs)
 
 
+class Randomizer:
+    """
+    Base class for randomizer object to generate a voter ranking. Default
+    generate method assumes a uniform distribution.
+    """
+    def __init__(self, number_of_alternatives: int = 2, number_to_rank_funx: Union[Callable, str, None] = None):
+        self.number_of_alternatives = number_of_alternatives
+        if number_to_rank_funx is None:
+            self.number_to_rank_funx = lambda: self.number_of_alternatives
+        elif type(number_to_rank_funx) is str:
+            if number_to_rank_funx == 'all':
+                self.number_to_rank_funx = lambda: self.number_of_alternatives
+            elif number_to_rank_funx == 'uniform':
+                self.number_to_rank_funx =\
+                    lambda: random.randint(1, self.number_of_alternatives)
+        else:
+            self.number_to_rank_funx = number_to_rank_funx
+
+    def generate_rank(self):
+        number_to_rank = self.number_to_rank_funx()
+        ranking = random.sample(list(range(self.number_of_alternatives)),
+                                number_to_rank)
+        return ranking
+
+A = Randomizer(5, 'uniform')
+
+
+class CoalitionRandomizer(Randomizer):
+    """
+    Randomizer that generates only rankings that obey the coalition rule:
+    A coalition voter has all coalition members consecutively in their order of
+    preference. E.g. a voter considers two coalitions (0 and 1) with 2 and 3
+    alternatives, respectively (coalition 0 has alternatives 0, 1 and coalition 1
+    has alternatives 2, 3, 4).
+    The following are valid rankings:
+    - 1, 2, 3
+    - 0, 3
+    - 2, 3, 0, 1
+    - 3, 4, 2, 1, 0
+    - 1,
+    While the following rankings are invalid for a coalition voter:
+    - 0, 4, 1
+    - 2, 1, 3
+    """
+    def __init__(self, coalition_sizes: list, number_to_rank_funx: Union[Callable, str, None] = None):
+        number_of_alternatives = sum(coalition_sizes)
+        self.coalition_sizes = coalition_sizes
+        super().__init__(number_of_alternatives, number_to_rank_funx)
+        self.coalition_to_alternative_dict = {}
+        self.alternative_to_coalition_dict = {}
+        index = 0
+        for coalition, size in enumerate(coalition_sizes):
+            self.coalition_to_alternative_dict[coalition] = range(index, index + size)
+            for alternative in range(index, index + size):
+                self.alternative_to_coalition_dict[alternative] = coalition
+            index += size
+
+    def generate_rank(self):
+        start = time.time()
+        number_to_rank = self.number_to_rank_funx()
+        alternatives_to_rank = random.sample(list(range(self.number_of_alternatives)),
+                                number_to_rank)
+        coalitions_to_rank = dict()
+        for alternative in alternatives_to_rank:
+            coalition = self.alternative_to_coalition_dict[alternative]
+            if coalition not in coalitions_to_rank:
+                coalitions_to_rank[coalition] = set()
+            coalitions_to_rank[coalition].add(alternative)
+
+        coalition_order = list(coalitions_to_rank.keys())
+        random.shuffle(coalition_order)
+        ranking = list()
+        for coalition in coalition_order:
+            alternatives = list(coalitions_to_rank[coalition])
+            random.shuffle(alternatives)
+            ranking.extend(alternatives)
+        # print(alternatives_to_rank, ranking)
+        # print(time.time() - start)
+        return ranking
+
+B = CoalitionRandomizer([4, 3, 2], 'uniform')
+
+
 class Vote:
     """
     Class for a single vote object. Automatically generates a ranking on
     instantiation based on a generator function.
     """
-    def __init__(self, number_of_alternatives, randomizer_fn):
-        ranking = randomizer_fn(number_of_alternatives)
+    def __init__(self, randomizer: Randomizer):
+        ranking = randomizer.generate_rank()
         self.ranking = ranking
         self.preference_cache = dict()
 
@@ -67,98 +150,24 @@ class Vote:
                 return None
 
 
-class Randomizer:
-    """
-    Base class for randomizer object to generate a voter ranking. Default
-    generate method assumes a uniform distribution.
-    """
-    def __init__(self, number_of_alternatives: int = 2, number_to_rank_funx: Union[Callable, str, None] = None):
-        self.number_of_alternatives = number_of_alternatives
-        if number_to_rank_funx is None:
-            self.number_to_rank_funx = lambda: self.number_of_alternatives
-        elif type(number_to_rank_funx) is str:
-            if number_to_rank_funx == 'all':
-                self.number_to_rank_funx = lambda: self.number_of_alternatives
-            elif number_to_rank_funx == 'uniform':
-                self.number_to_rank_funx =\
-                    lambda: random.randint(1, self.number_of_alternatives)
-        else:
-            self.number_to_rank_funx = number_to_rank_funx
-
-    def generate_rank(self):
-        number_to_rank = self.number_to_rank_funx()
-        ranking = random.sample(list(range(self.number_of_alternatives)),
-                                number_to_rank)
-        return ranking
-
-A = Randomizer(5, 'uniform')
-
-
-class CoalitionRandomizer(Randomizer):
-    def __init__(self, coalition_sizes: list, number_to_rank_funx: Union[Callable, str, None] = None):
-        number_of_alternatives = sum(coalition_sizes)
-        self.coalition_sizes = coalition_sizes
-        super().__init__(number_of_alternatives, number_to_rank_funx)
-        self.coalition_to_alternative_dict = {}
-        self.alternative_to_coalition_dict = {}
-        index = 0
-        for coalition, size in enumerate(coalition_sizes):
-            self.coalition_to_alternative_dict[coalition] = range(index, index + size)
-            for alternative in range(index, index + size):
-                self.alternative_to_coalition_dict[alternative] = coalition
-            index += size
-
-    def generate_rank(self):
-        start = time.time()
-        number_to_rank = self.number_to_rank_funx()
-        alternatives_to_rank = random.sample(list(range(self.number_of_alternatives)),
-                                number_to_rank)
-        coalitions_to_rank = dict()
-        for alternative in alternatives_to_rank:
-            coalition = self.alternative_to_coalition_dict[alternative]
-            if coalition not in coalitions_to_rank:
-                coalitions_to_rank[coalition] = set()
-            coalitions_to_rank[coalition].add(alternative)
-
-        coalition_order = list(coalitions_to_rank.keys())
-        random.shuffle(coalition_order)
-        ranking = list()
-        for coalition in coalition_order:
-            alternatives = list(coalitions_to_rank[coalition])
-            random.shuffle(alternatives)
-            ranking.extend(alternatives)
-        print(alternatives_to_rank, ranking)
-        print(time.time() - start)
-        return ranking
-
-B = CoalitionRandomizer([4, 3, 2], 'uniform')
-
-def randomizer_1(number_of_alternatives):
-    number_to_rank = random.randint(1, number_of_alternatives)
-    ranking = random.sample(list(range(number_of_alternatives)), number_to_rank)
-    return ranking
-
-
-
 class Election_Profile:
+
     """
     Class for election profile, all Vote objects are created on instantiation.
     """
-    def __init__(self, number_of_votes: int, number_of_alternatives: int,
-                 randomizer_fn: Callable):
+    def __init__(self, number_of_votes: int, randomizer: Randomizer):
         self.votes = []
         self.rankings = []
-        self.number_of_alternatives = number_of_alternatives
+        self.number_of_alternatives = randomizer.number_of_alternatives
         self.number_of_votes = number_of_votes
         for ii in range(number_of_votes):
-            new_vote = Vote(number_of_alternatives, randomizer_fn)
+            new_vote = Vote(randomizer)
             self.votes.append(new_vote)
             self.rankings.append(new_vote.ranking)
 
-        sub_lists = []
-        for ii in range(2, number_of_alternatives):
-            sub_lists.extend(set(itertools.combinations(range(number_of_alternatives), ii)))
-        self.sub_lists = sub_lists
+        self.sub_lists = []
+        for ii in range(2, self.number_of_alternatives):
+            self.sub_lists.extend(set(itertools.combinations(range(self.number_of_alternatives), ii)))
 
     def simplify(self, remaining_alternatives):
         simplified_rankings = []
@@ -170,6 +179,30 @@ class Election_Profile:
     def __str__(self):
         return str(self.rankings)
 
+
+class EvaluationProcedure:
+    def __init__(self, first_place_only: bool = False):
+        self.first_place_only = first_place_only
+
+    def evaluate(self, rankings: list[list], list_of_alternatives: list):
+        pass
+
+
+class FirstPastThePost(EvaluationProcedure):
+    def __init__(self, first_place_only: bool = False):
+        super().__init__(first_place_only)
+
+    def evaluate(self, rankings: list[list], list_of_alternatives: list):
+        list_of_alternatives = np.array(list_of_alternatives)
+        vote_totals = np.zeros((len(list_of_alternatives)))
+        for ranking in rankings:
+            if len(ranking) > 0:
+                vote_totals[np.where(list_of_alternatives == ranking[0])] += 1
+        society_ranking = list_of_alternatives[np.flip(np.argsort(vote_totals))]
+        if self.first_place_only:
+            return society_ranking[0]
+        else:
+            return society_ranking
 
 def fptp(rankings, list_of_alternatives):
     list_of_alternatives = np.array(list_of_alternatives)
@@ -184,11 +217,34 @@ def fptp(rankings, list_of_alternatives):
 
 
 class Axiom:
-    def __init__(self, check_function):
-        self.check_function = check_function
+    def __init__(self, first_place_only: bool = True):
+        self.first_place_only = first_place_only
 
-    def check_axiom(self, election, voting_system):
+    def check_axiom(self, election: Election_Profile,
+                    evaluation_procedure: EvaluationProcedure):
         pass
+
+
+class IndependenceOfIrrelevantAlternatives(Axiom):
+    def __init__(self, first_place_only: bool = True):
+        super().__init__(first_place_only)
+
+    def check_axiom(self, election: Election_Profile,
+                    evaluation_procedure: EvaluationProcedure):
+        number_of_alternatives = election.number_of_alternatives
+        society_ranking =\
+            evaluation_procedure.evaluate(election.rankings,
+                                          list(range(number_of_alternatives)))
+        sub_lists = election.sub_lists
+        if self.first_place_only:
+            sub_lists = [ii for ii in sub_lists if society_ranking[0] in ii]
+        for sub_list in sub_lists:
+            new_society_ranking = evaluation_procedure.evaluate(
+                simplify(election.rankings, sub_list), list(sub_list))
+            if not check_maintains_order(new_society_ranking, society_ranking, self.first_place_only):
+                print(f'IIA Failed: Ranking with all was {society_ranking}, but the ranking with only the alternatives {sub_list} is {new_society_ranking}')
+                return False
+        return True
 
 def check_iia(voting_system, election, check_all=True):
     number_of_alternatives = election.number_of_alternatives
@@ -198,22 +254,24 @@ def check_iia(voting_system, election, check_all=True):
         if not check_all and society_ranking[0] not in sub_list:
             continue
         new_society_ranking = voting_system(simplify(election.rankings, sub_list), list(sub_list))
-        print(new_society_ranking)
         if not check_maintains_order(new_society_ranking, society_ranking):
-            # print(f'IIA Failed: Ranking with all was {society_ranking}, but the ranking with only the alternatives {sub_list} is {new_society_ranking}')
+            print(f'IIA Failed: Ranking with all was {society_ranking}, but the ranking with only the alternatives {sub_list} is {new_society_ranking}')
             return False
     # print('IIA Satisfied')
     return True
 
 
-def check_maintains_order(small_list, large_list):
-    index = 0
-    for element in large_list:
-        if small_list[index] == element:
-            index += 1
-            if index == len(small_list):
-                return True
-    return False
+def check_maintains_order(small_list, large_list, first_place_only):
+    if first_place_only:
+        return small_list[0] == large_list[0]
+    else:
+        index = 0
+        for element in large_list:
+            if small_list[index] == element:
+                index += 1
+                if index == len(small_list):
+                    return True
+        return False
 
 
 def simplify(rankings, remaining_alternatives):
@@ -261,11 +319,16 @@ def check_unanimity(voting_system, election):
 
 now = time.time()
 N = 100
-iia = np.full(N, False)
+results = np.full(N, False)
+number_candidates = 3
+randomizer = Randomizer(number_candidates, 'uniform')
+fptp = FirstPastThePost()
+iia = IndependenceOfIrrelevantAlternatives()
 for ii in range(N):
-    election = Election_Profile(1000, 5, randomizer_1)
+    election = Election_Profile(1000, randomizer)
+    results[ii] = iia.check_axiom(election, fptp)
     # print(election)
-    iia[ii] = check_iia(fptp, election)
-    check_unanimity(fptp, election)
-print(sum(iia)/N)
+    # results[ii] = check_iia(fptp, election)
+    # check_unanimity(fptp, election)
+print(f'FPTP satisfies IIA {100 * sum(results)/N}% of the time')
 print(time.time() - now)
