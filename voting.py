@@ -200,7 +200,7 @@ class FirstPastThePost(EvaluationProcedure):
                 vote_totals[np.where(list_of_alternatives == ranking[0])] += 1
         society_ranking = list_of_alternatives[np.flip(np.argsort(vote_totals))]
         if self.first_place_only:
-            return society_ranking[0]
+            return society_ranking[0:1]
         else:
             return society_ranking
 
@@ -223,6 +223,50 @@ class InstantRunoff(EvaluationProcedure):
             list_of_alternatives.remove(min_alternative)
             rankings = simplify(rankings, list_of_alternatives)
             return self.evaluate(rankings, list_of_alternatives)
+
+
+class BordaCount(EvaluationProcedure):
+    def __init__(self, first_place_only: bool = False):
+        super().__init__(first_place_only)
+
+    def borda_score(self, index, number_of_alternatives):
+        return number_of_alternatives - index
+
+    def evaluate(self, rankings: list[list], list_of_alternatives: list):
+        if len(list_of_alternatives) == 1:
+            return [list_of_alternatives[0]]
+        borda_score = {ii: 0 for ii in list_of_alternatives}
+        number_of_alternatives = len(list_of_alternatives)
+        for ranking in rankings:
+            for index, alternative in enumerate(ranking):
+                borda_score[alternative] +=\
+                    self.borda_score(index, number_of_alternatives)
+        society_ranking = [key for key, value in
+                           sorted(borda_score.items(),
+                                  key=lambda item: item[1],
+                                  reverse=True)]
+        if self.first_place_only:
+            return society_ranking[:1]
+        else:
+            return society_ranking
+
+
+class TournamentStyleBordaCount(BordaCount):
+    def __init__(self, first_place_only: bool = False):
+        super().__init__(first_place_only)
+
+    def borda_score(self, index, number_of_alternatives):
+        return number_of_alternatives - index - 1
+
+
+class DowdallBordaCount(BordaCount):
+    def __init__(self, first_place_only: bool = False):
+        super().__init__(first_place_only)
+
+    def borda_score(self, index, number_of_alternatives):
+        return 1 / (index + 1)
+
+
 
 
 class Axiom:
@@ -314,22 +358,37 @@ def check_unanimity(voting_system, election):
 
 now = time.time()
 N = 1000
-fptp_results = np.full(N, False)
-ir_results = np.full(N, False)
-number_candidates = 4
+fptp_axiom_results = np.full(N, False)
+ir_axiom_results = np.full(N, False)
+borda_axiom_results = np.full(N, False)
+tournament_borda_axiom_results = np.full(N, False)
+dowdall_borda_axiom_results = np.full(N, False)
+number_candidates = 3
 randomizer = Randomizer(number_candidates, 'uniform')
 fptp = FirstPastThePost()
 ir = InstantRunoff()
+borda = BordaCount()
+tournament_borda = TournamentStyleBordaCount()
+dowdall_borda = DowdallBordaCount()
 iia = IndependenceOfIrrelevantAlternatives()
 for ii in range(N):
     election = Election_Profile(1000, randomizer)
     fptp_result = fptp.evaluate(election.rankings, list(range(number_candidates)))
     ir_result = ir.evaluate(election.rankings, list(range(number_candidates)))
-    fptp_results[ii] = iia.check_axiom(election, fptp)
-    ir_results[ii] = iia.check_axiom(election, ir)
+    borda_result = borda.evaluate(election.rankings, list(range(number_candidates)))
+    tournament_borda_result = tournament_borda.evaluate(election.rankings, list(range(number_candidates)))
+    dowdall_borda_result = dowdall_borda.evaluate(election.rankings, list(range(number_candidates)))
+    fptp_axiom_results[ii] = iia.check_axiom(election, fptp)
+    ir_axiom_results[ii] = iia.check_axiom(election, ir)
+    borda_axiom_results[ii] = iia.check_axiom(election, borda)
+    tournament_borda_axiom_results[ii] = iia.check_axiom(election, tournament_borda)
+    dowdall_borda_axiom_results[ii] = iia.check_axiom(election, dowdall_borda)
     # print(election)
     # results[ii] = check_iia(fptp, election)
     # check_unanimity(fptp, election)
-print(f'FPTP satisfies IIA {100 * sum(fptp_results)/N}% of the time')
-print(f'IR satisfies IIA {100 * sum(ir_results)/N}% of the time')
+print(f'FPTP satisfies IIA {100 * sum(fptp_axiom_results) / N}% of the time')
+print(f'IR satisfies IIA {100 * sum(ir_axiom_results) / N}% of the time')
+print(f'Borda satisfies IIA {100 * sum(borda_axiom_results) / N}% of the time')
+print(f'Tournament Borda satisfies IIA {100 * sum(tournament_borda_axiom_results) / N}% of the time')
+print(f'Dowdall Borda satisfies IIA {100 * sum(tournament_borda_axiom_results) / N}% of the time')
 print(time.time() - now)
